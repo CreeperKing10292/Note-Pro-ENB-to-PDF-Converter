@@ -132,7 +132,7 @@ $('#download').onclick=async()=>{
     // Converter URL at the bottom-right, with the username redacted.
     pdf.setFontSize(8);
     pdf.setTextColor(125,125,125);
-    pdf.text('https://[REDACTED].github.io/Note-Pro-ENB-to-PDF-Converter/', pageW-margin, pageH-2.5, {align:'right'});
+    pdf.text('https://***************.github.io/Note-Pro-ENB-to-PDF-Converter/', pageW-margin, pageH-2.5, {align:'right'});
 
     await new Promise(r=>setTimeout(r,0));
   }
