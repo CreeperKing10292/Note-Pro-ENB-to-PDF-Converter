@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Logic Note Pro ENB to PDF</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;max-width:950px;margin:auto;padding:20px;background:#f5f5f7;color:#111}
+.card{background:#fff;border-radius:16px;padding:20px;box-shadow:0 2px 12px #0001;margin-bottom:18px}
+button,input{font:inherit}button{padding:11px 15px;border:0;border-radius:10px;background:#111;color:#fff;margin:4px}
+button:disabled{opacity:.4}.small{color:#666;font-size:.9rem}
+canvas{width:100%;height:auto;background:#fff;border:1px solid #ddd;margin-top:8px}
+.page{margin:20px 0}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Logic Note Pro ENB → PDF</h1>
+<p>Select a <b>.enb</b> or <b>.zip</b> file. ENB files are treated automatically as ZIP packages; you do not need to rename them.</p>
+<input id="file" type="file" accept=".enb,.zip,application/zip">
+<button id="download" disabled>Download Landscape PDF</button>
+<p id="status" class="small">Waiting for a file.</p>
+</div>
+<div id="pages"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+let rendered=[], sourceName='notes';
+
+function color(v){
+  v=(v||'#FF000000').replace('#','');
+  if(v.length===8)v=v.slice(2);
+  return '#'+v.padStart(6,'0');
+}
+function val(node,tag,def=''){
+  const e=node?.getElementsByTagName(tag)[0];
+  return e?.textContent ?? def;
+}
+function pts(s){
+  return (s||'').split(';').map(x=>x.trim()).filter(Boolean)
+    .map(x=>x.split(',').map(Number)).filter(p=>p.length>=2);
+}
+function line(ctx,p,w,col,closed=false){
+  if(p.length<2)return;
+  ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);
+  for(let i=1;i<p.length;i++)ctx.lineTo(p[i][0],p[i][1]);
+  if(closed)ctx.closePath();
+  ctx.strokeStyle=col;ctx.lineWidth=w;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+}
+async function renderXml(xmlText,index){
+  const doc=new DOMParser().parseFromString(xmlText,'application/xml');
+  const data=doc.querySelector('Slide > Data')||doc.querySelector('Data');
+  const W=+val(data,'Width','3840'), H=+val(data,'Height','2160');
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle=color(val(data,'BackgroundValue','#FFFFFFFF'));ctx.fillRect(0,0,W,H);
+
+  doc.querySelectorAll('Packages > Package').forEach(pkg=>{
+    const type=pkg.getAttribute('Type'),d=pkg.querySelector(':scope > Data');
+    if(!d)return;
+    const col=color(val(d,'ForegroundColor','#FF000000')),w=+val(d,'Thickness','3');
+    if(type==='Ink'||type==='StraightLine')line(ctx,pts(val(d,'Points')),w,col);
+    else if(type==='Rectangle'||type==='Diamond')line(ctx,pts(val(d,'Points')),w,col,true);
+    else if(type==='Ellipse'){
+      const a=val(d,'StartPoint','0,0').split(',').map(Number);
+      const b=val(d,'EndPoint','0,0').split(',').map(Number);
+      ctx.beginPath();
+      ctx.ellipse((a[0]+b[0])/2,(a[1]+b[1])/2,Math.abs(b[0]-a[0])/2,Math.abs(b[1]-a[1])/2,0,0,Math.PI*2);
+      ctx.strokeStyle=col;ctx.lineWidth=w;ctx.stroke();
+    }
+  });
+  rendered.push(cv);
+  const wrap=document.createElement('div');wrap.className='card page';
+  wrap.innerHTML='<div class="small">Page '+(index+1)+'</div>';wrap.appendChild(cv);$('#pages').appendChild(wrap);
+}
+
+$('#file').onchange=async e=>{
+  $('#pages').innerHTML='';rendered=[];$('#download').disabled=true;
+  const f=e.target.files[0];if(!f)return;
+  sourceName=f.name.replace(/\.(enb|zip)$/i,'')||'notes';
+  try{
+    const isEnb=/\.enb$/i.test(f.name);
+    $('#status').textContent=isEnb
+      ? 'ENB detected - opening it automatically as a ZIP package…'
+      : 'Opening ZIP package…';
+
+    // No physical rename is necessary: ENB is ZIP-compatible and JSZip reads its bytes directly.
+    const zip=await JSZip.loadAsync(await f.arrayBuffer());
+    let names=Object.keys(zip.files).filter(n=>/Slide_\d+\.xml$/i.test(n));
+    names.sort((a,b)=>(+a.match(/Slide_(\d+)/i)[1])-(+b.match(/Slide_(\d+)/i)[1]));
+    if(!names.length)throw Error('No Slide_*.xml files found. This may be a different ENB format.');
+
+    for(let i=0;i<names.length;i++){
+      $('#status').textContent=`Rendering page ${i+1} of ${names.length}…`;
+      await renderXml(await zip.file(names[i]).async('text'),i);
+      await new Promise(r=>setTimeout(r,0));
+    }
+    $('#status').textContent=`Ready: ${names.length} pages. PDF will use landscape A4 pages with small margins.`;
+    $('#download').disabled=false;
+  }catch(err){
+    $('#status').textContent='Could not open this file: '+err.message;
+  }
+};
+
+$('#download').onclick=async()=>{
+  if(!rendered.length)return;
+  const {jsPDF}=window.jspdf;
+  // A4 landscape: 297 x 210 mm.
+  const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4',compress:true});
+  const pageW=297,pageH=210,margin=5;
+  const availW=pageW-margin*2,availH=pageH-margin*2;
+
+  $('#status').textContent='Building landscape PDF…';
+  for(let i=0;i<rendered.length;i++){
+    if(i)pdf.addPage('a4','landscape');
+    const cv=rendered[i],ratio=cv.width/cv.height;
+    let w=availW,h=w/ratio;
+    if(h>availH){h=availH;w=h*ratio}
+    const x=(pageW-w)/2,y=(pageH-h)/2;
+    // JPEG keeps file size reasonable while retaining the original 4K canvas detail.
+    const img=cv.toDataURL('image/jpeg',0.96);
+    pdf.addImage(img,'JPEG',x,y,w,h,undefined,'FAST');
+    await new Promise(r=>setTimeout(r,0));
+  }
+  pdf.save(sourceName+'_landscape.pdf');
+  $('#status').textContent='PDF created. If Safari asks, choose Download or Save to Files.';
+};
+</script>
+</body></html>
