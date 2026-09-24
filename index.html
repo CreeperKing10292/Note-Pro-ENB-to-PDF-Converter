@@ -124,8 +124,8 @@ $('#download').onclick=async()=>{
     pdf.addImage(img,'JPEG',x,y,w,h,undefined,'FAST');
 
     // Slightly larger grey page counter at the bottom-right of every PDF page.
-    pdf.setFont('times','italic');
-    pdf.setFontSize(10);
+    pdf.setFont('courier','bold');
+    pdf.setFontSize(12);
     pdf.setTextColor(105,105,105);
     pdf.text(`${i+1} / ${rendered.length}`, pageW-margin, pageH-2.5, {align:'right'});
 
